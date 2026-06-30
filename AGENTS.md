@@ -22,7 +22,7 @@ Main files:
 ## Run
 
 ```bash
-node server.js
+node --watch server.js
 ```
 
 Then open:

@@ -175,6 +175,7 @@
       const TILE_SIZE = 16;
       const TILE_SCALE = 3;
       const WORLD_TILE_SIZE = TILE_SIZE * TILE_SCALE;
+      const LEVEL_CACHE_PADDING = 512;
 
       const game = {
         width: 0,
@@ -185,6 +186,15 @@
         lastFrameTime: 0,
         loaded: false,
       };
+
+      const levelCache = {
+        canvas: document.createElement("canvas"),
+        context: null,
+        originX: LEVEL_CACHE_PADDING,
+        dirty: true,
+      };
+      levelCache.context = levelCache.canvas.getContext("2d");
+      levelCache.context.imageSmoothingEnabled = false;
 
       const player = {
         x: 0,
@@ -470,6 +480,7 @@
         player.worldX = clamp(player.worldX || level.startX, 40, level.width - 40);
         game.maxCameraX = Math.max(level.width - game.width, 0);
         updateLevelGeometry();
+        markLevelCacheDirty();
         updateCamera();
       }
 
@@ -587,6 +598,7 @@
         editor.template.opacity = 0.45;
         editor.selection = null;
         syncEditorUi();
+        markLevelCacheDirty();
         setEditorStatus("Reset");
       }
 
@@ -819,6 +831,7 @@
         if (tool === "rock") {
           level.platforms.push({ kind: "rock", x, yOffset, columns: 6, rows: 4 });
           updateLevelGeometry();
+          markLevelCacheDirty();
           setEditorStatus("Rock");
           return { collection: "platforms", index: level.platforms.length - 1 };
         }
@@ -826,6 +839,7 @@
         if (tool === "thin") {
           level.platforms.push({ kind: "thin", x, yOffset, columns: 5 });
           updateLevelGeometry();
+          markLevelCacheDirty();
           setEditorStatus("Grass");
           return { collection: "platforms", index: level.platforms.length - 1 };
         }
@@ -833,12 +847,14 @@
         if (tool === "scenic") {
           level.scenicPlatforms.push({ kind: "rock", x, yOffset, columns: 4, rows: 3 });
           updateLevelGeometry();
+          markLevelCacheDirty();
           setEditorStatus("Scenic");
           return { collection: "scenicPlatforms", index: level.scenicPlatforms.length - 1 };
         }
 
         if (tool === "tree") {
           level.trees.push({ frame: level.trees.length % 2, x, yOffset, scale: 1.8 });
+          markLevelCacheDirty();
           setEditorStatus("Tree");
           return { collection: "trees", index: level.trees.length - 1 };
         }
@@ -848,6 +864,7 @@
           if (tool === "spikes") decoration.count = 2;
           if (tool === "bridge") decoration.pieces = 1;
           level.decorations.push(decoration);
+          markLevelCacheDirty();
           setEditorStatus(tool);
           return { collection: "decorations", index: level.decorations.length - 1 };
         }
@@ -1000,6 +1017,8 @@
         if (selection.collection === "platforms" || selection.collection === "scenicPlatforms") {
           updateLevelGeometry();
         }
+
+        markLevelCacheDirty();
       }
 
       function getSelectedObject(selection = editor.selection) {
@@ -1024,6 +1043,7 @@
         collection.splice(editor.selection.index, 1);
         editor.selection = null;
         updateLevelGeometry();
+        markLevelCacheDirty();
         setEditorStatus("Deleted");
       }
 
@@ -1050,6 +1070,7 @@
         player.worldX = clamp(snapWorld(player.worldX), 40, level.width - 40);
         game.maxCameraX = Math.max(level.width - game.width, 0);
         updateLevelGeometry();
+        markLevelCacheDirty();
         updateCamera();
         setEditorStatus("Snapped");
       }
@@ -1071,6 +1092,7 @@
         context.imageSmoothingEnabled = false;
         updateBackgroundLayout();
         updateLevelGeometry();
+        markLevelCacheDirty();
 
         if (player.worldX === 0) {
           player.worldX = level.startX;
@@ -1104,6 +1126,8 @@
           platform.height = rows * WORLD_TILE_SIZE;
           platform.right = platform.x + platform.width;
         }
+
+        markLevelCacheDirty();
       }
 
       async function loadSprite(sprite) {
@@ -1817,7 +1841,7 @@
       function drawBackgroundLayer(layer) {
         if (!layer.image || layer.drawWidth === 0) return;
 
-        const offsetX = positiveModulo(player.worldX * layer.parallax, layer.drawWidth);
+        const offsetX = positiveModulo(game.cameraX * layer.parallax, layer.drawWidth);
 
         for (let x = -offsetX - layer.drawWidth; x < game.width + layer.drawWidth; x += layer.drawWidth) {
           context.drawImage(layer.image, Math.round(x), layer.drawY, layer.drawWidth, layer.drawHeight);
@@ -1847,18 +1871,175 @@
       }
 
       function drawLevel() {
-        drawScenicPlatforms();
-        drawTrees();
+        ensureLevelCache();
+
+        const sourceX = Math.round(game.cameraX + levelCache.originX);
+        const sourceWidth = Math.min(game.width, levelCache.canvas.width - sourceX);
+
+        if (sourceWidth <= 0) return;
+
+        context.drawImage(levelCache.canvas, sourceX, 0, sourceWidth, game.height, 0, 0, sourceWidth, game.height);
+      }
+
+      function markLevelCacheDirty() {
+        levelCache.dirty = true;
+      }
+
+      function ensureLevelCache() {
+        const width = Math.ceil(level.width + levelCache.originX * 2);
+        const height = Math.ceil(game.height);
+
+        if (levelCache.canvas.width !== width || levelCache.canvas.height !== height) {
+          levelCache.canvas.width = width;
+          levelCache.canvas.height = height;
+          levelCache.context.imageSmoothingEnabled = false;
+          levelCache.dirty = true;
+        }
+
+        if (!levelCache.dirty) return;
+
+        rebuildLevelCache();
+      }
+
+      function rebuildLevelCache() {
+        const cacheContext = levelCache.context;
+
+        cacheContext.clearRect(0, 0, levelCache.canvas.width, levelCache.canvas.height);
+        cacheContext.imageSmoothingEnabled = false;
+
+        drawCachedScenicPlatforms(cacheContext);
+        drawCachedTrees(cacheContext);
 
         for (const platform of level.platforms) {
           if (platform.kind === "thin") {
-            drawThinPlatform(platform);
+            drawCachedThinPlatform(cacheContext, platform);
           } else {
-            drawRockPlatform(platform);
+            drawCachedRockPlatform(cacheContext, platform);
           }
         }
 
-        drawDecorations();
+        drawCachedDecorations(cacheContext);
+        levelCache.dirty = false;
+      }
+
+      function drawCachedScenicPlatforms(cacheContext) {
+        for (const platform of level.scenicPlatforms) {
+          drawCachedRockPlatform(cacheContext, platform);
+        }
+      }
+
+      function drawCachedTrees(cacheContext) {
+        if (!foreground.trees.image) return;
+
+        for (const tree of level.trees) {
+          const sourceX = tree.frame * 128;
+          const drawWidth = 128 * tree.scale;
+          const drawHeight = 128 * tree.scale;
+          const x = cacheWorldToX(tree.x) - drawWidth / 2;
+          const y = game.groundY + tree.yOffset - drawHeight + 11 * tree.scale;
+
+          cacheContext.drawImage(
+            foreground.trees.image,
+            sourceX,
+            0,
+            128,
+            128,
+            Math.round(x),
+            Math.round(y),
+            Math.round(drawWidth),
+            Math.round(drawHeight),
+          );
+        }
+      }
+
+      function drawCachedRockPlatform(cacheContext, platform) {
+        for (let row = 0; row < platform.rows; row += 1) {
+          for (let column = 0; column < platform.columns; column += 1) {
+            const source = getRockTile(column, row, platform.columns, platform.rows);
+            drawCachedTile(
+              cacheContext,
+              source.x,
+              source.y,
+              platform.x + column * WORLD_TILE_SIZE,
+              platform.worldY + row * WORLD_TILE_SIZE,
+            );
+          }
+        }
+      }
+
+      function drawCachedThinPlatform(cacheContext, platform) {
+        for (let column = 0; column < platform.columns; column += 1) {
+          const tileX = column === 0 ? 6 : column === platform.columns - 1 ? 9 : column % 2 === 0 ? 8 : 7;
+          drawCachedTile(cacheContext, tileX, 2, platform.x + column * WORLD_TILE_SIZE, platform.worldY);
+        }
+      }
+
+      function drawCachedDecorations(cacheContext) {
+        if (!foreground.tileset.image) return;
+
+        for (const decoration of level.decorations) {
+          const surfaceY = game.groundY + decoration.yOffset;
+
+          if (decoration.kind === "fence") {
+            drawCachedTilesetRegion(cacheContext, 6, 3, 3, 1, decoration.x, surfaceY - WORLD_TILE_SIZE);
+          }
+
+          if (decoration.kind === "bush") {
+            drawCachedTilesetRegion(cacheContext, 5, 5, 3, 1, decoration.x, surfaceY - WORLD_TILE_SIZE * 0.72);
+          }
+
+          if (decoration.kind === "spikes") {
+            for (let index = 0; index < decoration.count; index += 1) {
+              drawCachedTilesetRegion(
+                cacheContext,
+                9,
+                3,
+                1,
+                1,
+                decoration.x + index * WORLD_TILE_SIZE,
+                surfaceY - WORLD_TILE_SIZE,
+              );
+            }
+          }
+
+          if (decoration.kind === "bridge") {
+            for (let index = 0; index < decoration.pieces; index += 1) {
+              drawCachedTilesetRegion(
+                cacheContext,
+                6,
+                3,
+                3,
+                1,
+                decoration.x + index * WORLD_TILE_SIZE * 3,
+                surfaceY - WORLD_TILE_SIZE * 0.85,
+              );
+            }
+          }
+        }
+      }
+
+      function drawCachedTile(cacheContext, tileX, tileY, worldX, worldY) {
+        drawCachedTilesetRegion(cacheContext, tileX, tileY, 1, 1, worldX, worldY);
+      }
+
+      function drawCachedTilesetRegion(cacheContext, tileX, tileY, tilesWide, tilesHigh, worldX, worldY) {
+        if (!foreground.tileset.image) return;
+
+        cacheContext.drawImage(
+          foreground.tileset.image,
+          tileX * TILE_SIZE,
+          tileY * TILE_SIZE,
+          tilesWide * TILE_SIZE,
+          tilesHigh * TILE_SIZE,
+          Math.round(cacheWorldToX(worldX)),
+          Math.round(worldY),
+          Math.round(tilesWide * WORLD_TILE_SIZE),
+          Math.round(tilesHigh * WORLD_TILE_SIZE),
+        );
+      }
+
+      function cacheWorldToX(worldX) {
+        return worldX + levelCache.originX;
       }
 
       function drawScenicPlatforms() {
@@ -2115,6 +2296,7 @@
 
         const deltaSeconds = Math.min(elapsed / 1000, 0.05);
         game.lastFrameTime = timestamp - (elapsed % FRAME_STEP);
+
         updateInputFromGamepad();
 
         if (editor.enabled) {

@@ -48,7 +48,7 @@ const server = http.createServer((request, response) => {
 function sendLevel(response) {
   fs.readFile(levelPath, "utf8", (error, data) => {
     if (error) {
-      const defaultLevelPath = path.join(root, "spritedemo.html");
+      const defaultLevelPath = path.join(root, "index.html");
 
       fs.readFile(defaultLevelPath, "utf8", (htmlError, html) => {
         if (htmlError) {
@@ -126,7 +126,7 @@ function saveLevel(request, response) {
 }
 
 function serveStatic(urlPath, response, headOnly) {
-  const decodedPath = decodeURIComponent(urlPath === "/" ? "/spritedemo.html" : urlPath);
+  const decodedPath = decodeURIComponent(urlPath === "/" ? "/index.html" : urlPath);
   const requestedPath = path.normalize(path.join(root, decodedPath));
 
   if (!requestedPath.startsWith(root)) {
@@ -177,6 +177,6 @@ function withCors(headers = {}) {
 }
 
 server.listen(port, () => {
-  console.log(`Sprite demo server: http://localhost:${port}/spritedemo.html`);
+  console.log(`Sprite demo server: http://localhost:${port}/index.html`);
   console.log(`Editor saves write to: ${levelPath}`);
 });
