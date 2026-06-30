@@ -1,0 +1,2277 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sprite Demo</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #8ed6ff;
+      }
+
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        image-rendering: pixelated;
+      }
+
+      #editor-ui {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 10;
+        width: min(360px, calc(100vw - 24px));
+        color: #f7fbff;
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        font-size: 12px;
+        pointer-events: none;
+      }
+
+      #editor-ui button,
+      #editor-ui select,
+      #editor-ui input {
+        pointer-events: auto;
+      }
+
+      #editor-ui button,
+      #editor-ui select {
+        min-height: 30px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 6px;
+        background: rgba(31, 38, 50, 0.88);
+        color: #f7fbff;
+        font: inherit;
+      }
+
+      #editor-ui button {
+        padding: 0 10px;
+        cursor: pointer;
+      }
+
+      #editor-ui button.active {
+        border-color: #9ee37d;
+        background: rgba(54, 94, 50, 0.94);
+      }
+
+      #editor-panel {
+        display: none;
+        margin-top: 8px;
+        padding: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 8px;
+        background: rgba(10, 16, 24, 0.76);
+        backdrop-filter: blur(8px);
+      }
+
+      #editor-ui.editing #editor-panel {
+        display: block;
+      }
+
+      .editor-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+
+      .editor-row:first-child {
+        margin-top: 0;
+      }
+
+      #editor-tool {
+        flex: 1 1 150px;
+        padding: 0 8px;
+      }
+
+      .editor-range {
+        display: grid;
+        grid-template-columns: 64px 1fr 42px;
+        gap: 8px;
+        align-items: center;
+        width: 100%;
+      }
+
+      .editor-range input {
+        width: 100%;
+        accent-color: #9ee37d;
+      }
+
+      #editor-status {
+        min-height: 16px;
+        color: rgba(247, 251, 255, 0.76);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="editor-ui">
+      <button id="editor-toggle" type="button">Edit</button>
+      <div id="editor-panel">
+        <div class="editor-row">
+          <select id="editor-tool" aria-label="Editor tool">
+            <option value="select">Select</option>
+            <option value="pan">Pan</option>
+            <option value="rock">Rock</option>
+            <option value="thin">Grass</option>
+            <option value="scenic">Scenic</option>
+            <option value="tree">Tree</option>
+            <option value="bush">Bush</option>
+            <option value="fence">Fence</option>
+            <option value="spikes">Spikes</option>
+            <option value="bridge">Bridge</option>
+            <option value="template">Template</option>
+          </select>
+          <button id="editor-delete" type="button">Delete</button>
+        </div>
+        <div class="editor-row">
+          <button id="editor-template" type="button">Template</button>
+          <button id="editor-save" type="button">Save</button>
+          <button id="editor-load" type="button">Load</button>
+          <button id="editor-download" type="button">Download</button>
+          <button id="editor-snap" type="button">Snap</button>
+          <button id="editor-reset" type="button">Reset</button>
+        </div>
+        <div class="editor-row">
+          <label class="editor-range">
+            <span>Opacity</span>
+            <input id="template-opacity" type="range" min="0.1" max="0.9" step="0.05" value="0.45" />
+            <span id="template-opacity-value">0.45</span>
+          </label>
+        </div>
+        <div class="editor-row">
+          <label class="editor-range">
+            <span>Scale</span>
+            <input id="template-scale" type="range" min="0.5" max="3" step="0.05" value="2.25" />
+            <span id="template-scale-value">2.25</span>
+          </label>
+        </div>
+        <div id="editor-status" class="editor-row"></div>
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("game");
+      const context = canvas.getContext("2d", { alpha: false });
+
+      const MAX_FPS = 60;
+      const FRAME_STEP = 1000 / MAX_FPS;
+      const TILE_SIZE = 16;
+      const TILE_SCALE = 3;
+      const WORLD_TILE_SIZE = TILE_SIZE * TILE_SCALE;
+
+      const game = {
+        width: 0,
+        height: 0,
+        groundY: 0,
+        cameraX: 0,
+        maxCameraX: 0,
+        lastFrameTime: 0,
+        loaded: false,
+      };
+
+      const player = {
+        x: 0,
+        y: 0,
+        worldX: 0,
+        velocityX: 0,
+        velocityY: 0,
+        speed: 280,
+        crouchSpeed: 120,
+        rollSpeed: 300,
+        slideSpeed: 330,
+        jumpVelocity: -700,
+        gravity: 1850,
+        colliderWidth: 42,
+        onGround: true,
+        animation: "idle",
+        animationTime: 0,
+        facing: 1,
+        turnTargetFacing: null,
+        crouchTarget: null,
+        attackQueued: null,
+        rollDirection: null,
+        slideDirection: null,
+        wallMount: null,
+      };
+
+      const input = {
+        left: false,
+        right: false,
+        up: false,
+        down: false,
+      };
+
+      const keyboardInput = {
+        left: false,
+        right: false,
+        up: false,
+        down: false,
+      };
+
+      const gamepadInput = {
+        left: false,
+        right: false,
+        up: false,
+        down: false,
+        previousDown: false,
+        buttons: [],
+      };
+
+      const sprites = {
+        idle: createSpriteConfig("sprites/_Idle (2).png", 10, 8),
+        run: createSpriteConfig("sprites/_Run (1).png", 10, 12),
+        turn: createSpriteConfig("sprites/_TurnAround.png", 3, 12, false),
+        attack: createSpriteConfig("sprites/_Attack.png", 4, 14, false),
+        attack2: createSpriteConfig("sprites/_Attack2.png", 6, 14, false),
+        attackCombo: createSpriteConfig("sprites/_AttackCombo.png", 10, 16, false),
+        crouchTransition: createSpriteConfig("sprites/_CrouchTransition.png", 1, 12, false),
+        crouch: createSpriteConfig("sprites/_Crouch.png", 1, 1),
+        crouchWalk: createSpriteConfig("sprites/_CrouchWalk.png", 8, 10),
+        roll: createSpriteConfig("sprites/_Roll.png", 12, 24, false),
+        slideStart: createSpriteConfig("sprites/_SlideTransitionStart.png", 1, 12, false),
+        slide: createSpriteConfig("sprites/_Slide.png", 2, 12),
+        slideEnd: createSpriteConfig("sprites/_SlideTransitionEnd.png", 1, 12, false),
+        wallClimb: createSpriteConfig("sprites/_WallClimbNoMovement.png", 7, 14, false),
+        jump: createSpriteConfig("sprites/_Jump (1).png", 3, 10, false),
+        fall: createSpriteConfig("sprites/_Fall.png", 3, 10, false),
+      };
+
+      const backgroundLayers = [
+        createBackgroundLayer("sprites/platform/background/CloudsBack.png", 0.01),
+        createBackgroundLayer("sprites/platform/background/CloudsFront.png", 0.025),
+        createBackgroundLayer("sprites/platform/background/BGBack.png", 0.04),
+        createBackgroundLayer("sprites/platform/background/BGFront.png", 0.06),
+      ];
+
+      const foreground = {
+        tileset: createImageAsset("sprites/platform/foreground/Tileset.png"),
+        trees: createImageAsset("sprites/platform/foreground/Trees.png"),
+        mockup: createImageAsset("sprites/platform/Mockup.png"),
+      };
+
+      const level = {
+        width: 3648,
+        startX: 240,
+        finishX: 3552,
+        platforms: [
+          { kind: "rock", x: -WORLD_TILE_SIZE, yOffset: 0, columns: 15, rows: 4 },
+          { kind: "thin", x: 720, yOffset: -96, columns: 6 },
+          { kind: "rock", x: 1104, yOffset: -48, columns: 8, rows: 4 },
+          { kind: "thin", x: 1536, yOffset: -144, columns: 5 },
+          { kind: "rock", x: 1824, yOffset: -96, columns: 9, rows: 4 },
+          { kind: "thin", x: 2352, yOffset: -192, columns: 6 },
+          { kind: "rock", x: 2736, yOffset: -96, columns: 18, rows: 4 },
+        ],
+        scenicPlatforms: [
+          { kind: "rock", x: -288, yOffset: -240, columns: 5, rows: 6 },
+          { kind: "rock", x: 1392, yOffset: -288, columns: 3, rows: 3 },
+          { kind: "rock", x: 2544, yOffset: -384, columns: 4, rows: 3 },
+        ],
+        trees: [
+          { frame: 0, x: -96, yOffset: -240, scale: 1.75 },
+          { frame: 0, x: 144, yOffset: 0, scale: 2.1 },
+          { frame: 1, x: 528, yOffset: 0, scale: 1.65 },
+          { frame: 0, x: 912, yOffset: -96, scale: 1.35 },
+          { frame: 1, x: 1200, yOffset: -48, scale: 2 },
+          { frame: 0, x: 1488, yOffset: -288, scale: 1.35 },
+          { frame: 0, x: 2016, yOffset: -96, scale: 1.9 },
+          { frame: 1, x: 2592, yOffset: -384, scale: 1.45 },
+          { frame: 1, x: 2928, yOffset: -96, scale: 2.15 },
+          { frame: 0, x: 3408, yOffset: -96, scale: 1.85 },
+        ],
+        decorations: [
+          { kind: "bush", x: 240, yOffset: 0 },
+          { kind: "fence", x: 432, yOffset: 0 },
+          { kind: "bridge", x: 672, yOffset: 0, pieces: 1 },
+          { kind: "spikes", x: 816, yOffset: -96, count: 2 },
+          { kind: "fence", x: 1152, yOffset: -48 },
+          { kind: "bush", x: 1392, yOffset: -48 },
+          { kind: "bush", x: 1440, yOffset: -288 },
+          { kind: "bridge", x: 1584, yOffset: -144, pieces: 1 },
+          { kind: "bush", x: 1968, yOffset: -96 },
+          { kind: "spikes", x: 2160, yOffset: -96, count: 3 },
+          { kind: "bush", x: 2544, yOffset: -384 },
+          { kind: "fence", x: 2928, yOffset: -96 },
+          { kind: "spikes", x: 3168, yOffset: -96, count: 2 },
+          { kind: "bush", x: 3456, yOffset: -96 },
+        ],
+      };
+
+      const LEVEL_STORAGE_KEY = "spritedemo-level-editor-v1";
+      const LEVEL_API_PATHS = ["/api/level", "/api/level/", "/api/level.json"];
+      const LEVEL_FILE_NAME = "level.json";
+      const defaultLevel = cloneLevelData(level);
+
+      const editor = {
+        enabled: false,
+        tool: "select",
+        panSpeed: 900,
+        keys: {
+          left: false,
+          right: false,
+        },
+        pointer: null,
+        selection: null,
+        template: {
+          visible: false,
+          x: 0,
+          y: 0,
+          scale: 2.25,
+          opacity: 0.45,
+        },
+        ui: {},
+      };
+
+      function createSpriteConfig(src, frameCount, fps, loop = true) {
+        return {
+          src,
+          frameWidth: 120,
+          frameHeight: 80,
+          frameCount,
+          fps,
+          loop,
+          scale: 3,
+          footOffset: 0,
+          removeBlackBackground: false,
+          image: null,
+        };
+      }
+
+      function createBackgroundLayer(src, parallax) {
+        return {
+          src,
+          parallax,
+          drawWidth: 0,
+          drawHeight: 0,
+          drawY: 0,
+          image: null,
+        };
+      }
+
+      function createImageAsset(src) {
+        return {
+          src,
+          image: null,
+        };
+      }
+
+      function cloneLevelData(source) {
+        return {
+          width: source.width,
+          startX: source.startX,
+          finishX: source.finishX,
+          platforms: source.platforms.map(clonePlatformData),
+          scenicPlatforms: source.scenicPlatforms.map(clonePlatformData),
+          trees: source.trees.map(cloneTreeData),
+          decorations: source.decorations.map(cloneDecorationData),
+        };
+      }
+
+      function clonePlatformData(platform) {
+        const data = {
+          kind: platform.kind,
+          x: platform.x,
+          yOffset: platform.yOffset,
+          columns: platform.columns,
+        };
+
+        if (platform.rows !== undefined) {
+          data.rows = platform.rows;
+        }
+
+        return data;
+      }
+
+      function cloneTreeData(tree) {
+        return {
+          frame: tree.frame,
+          x: tree.x,
+          yOffset: tree.yOffset,
+          scale: tree.scale,
+        };
+      }
+
+      function cloneDecorationData(decoration) {
+        const data = {
+          kind: decoration.kind,
+          x: decoration.x,
+          yOffset: decoration.yOffset,
+        };
+
+        if (decoration.count !== undefined) {
+          data.count = decoration.count;
+        }
+
+        if (decoration.pieces !== undefined) {
+          data.pieces = decoration.pieces;
+        }
+
+        return data;
+      }
+
+      function createSaveData() {
+        return {
+          version: 1,
+          savedAt: new Date().toISOString(),
+          level: cloneLevelData(level),
+          template: {
+            visible: editor.template.visible,
+            x: editor.template.x,
+            y: editor.template.y,
+            scale: editor.template.scale,
+            opacity: editor.template.opacity,
+          },
+        };
+      }
+
+      function applySaveData(data) {
+        if (!data || !data.level) return false;
+
+        applyLevelData(data.level);
+
+        if (data.template) {
+          editor.template.visible = Boolean(data.template.visible);
+          editor.template.x = Number(data.template.x) || 0;
+          editor.template.y = Number(data.template.y) || 0;
+          editor.template.scale = clamp(Number(data.template.scale) || 2.25, 0.5, 3);
+          editor.template.opacity = clamp(Number(data.template.opacity) || 0.45, 0.1, 0.9);
+        }
+
+        syncEditorUi();
+        return true;
+      }
+
+      function applyLevelData(data) {
+        level.width = Number(data.width) || defaultLevel.width;
+        level.startX = Number(data.startX) || defaultLevel.startX;
+        level.finishX = Number(data.finishX) || defaultLevel.finishX;
+        level.platforms = Array.isArray(data.platforms) ? data.platforms.map(clonePlatformData) : [];
+        level.scenicPlatforms = Array.isArray(data.scenicPlatforms) ? data.scenicPlatforms.map(clonePlatformData) : [];
+        level.trees = Array.isArray(data.trees) ? data.trees.map(cloneTreeData) : [];
+        level.decorations = Array.isArray(data.decorations) ? data.decorations.map(cloneDecorationData) : [];
+
+        player.worldX = clamp(player.worldX || level.startX, 40, level.width - 40);
+        game.maxCameraX = Math.max(level.width - game.width, 0);
+        updateLevelGeometry();
+        updateCamera();
+      }
+
+      async function saveLevelToStorage() {
+        const data = createSaveData();
+        const json = JSON.stringify(data, null, 2);
+        const savedToFile = await saveLevelToProjectFile(json);
+        let savedLocally = false;
+
+        try {
+          localStorage.setItem(LEVEL_STORAGE_KEY, JSON.stringify(data));
+          savedLocally = true;
+        } catch (error) {
+          savedLocally = false;
+        }
+
+        if (savedToFile) {
+          setEditorStatus("Saved level.json");
+        } else if (savedLocally) {
+          setEditorStatus("Saved locally");
+        } else {
+          setEditorStatus("Save failed");
+        }
+      }
+
+      async function saveLevelToProjectFile(json) {
+        for (const url of getLevelApiUrls()) {
+          try {
+            const response = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: json,
+            });
+
+            if (response.ok) return true;
+          } catch (error) {
+            continue;
+          }
+        }
+
+        return false;
+      }
+
+      async function loadLevelFromStorage(silent = false) {
+        if (await loadLevelFromProjectFile(silent)) {
+          return true;
+        }
+
+        try {
+          const stored = localStorage.getItem(LEVEL_STORAGE_KEY);
+          if (!stored) {
+            if (!silent) setEditorStatus("No save");
+            return false;
+          }
+
+          const loaded = applySaveData(JSON.parse(stored));
+          if (!silent) setEditorStatus(loaded ? "Loaded" : "Load failed");
+          return loaded;
+        } catch (error) {
+          if (!silent) setEditorStatus("Load failed");
+          return false;
+        }
+      }
+
+      async function loadLevelFromProjectFile(silent = false) {
+        for (const url of getLevelLoadUrls()) {
+          try {
+            const response = await fetch(url, { cache: "no-store" });
+            if (!response.ok) continue;
+
+            const loaded = applySaveData(await response.json());
+            if (!silent) setEditorStatus(loaded ? "Loaded level.json" : "Load failed");
+            return loaded;
+          } catch (error) {
+            continue;
+          }
+        }
+
+        return false;
+      }
+
+      function getLevelLoadUrls() {
+        return [LEVEL_FILE_NAME, ...getLevelApiUrls()];
+      }
+
+      function getLevelApiUrls() {
+        if (isSaveServerOrigin()) {
+          return LEVEL_API_PATHS;
+        }
+
+        const saveServerOrigin = getSaveServerOrigin();
+        return LEVEL_API_PATHS.map(path => `${saveServerOrigin}${path}`);
+      }
+
+      function isSaveServerOrigin() {
+        return location.protocol.startsWith("http") && location.port === "8787";
+      }
+
+      function getSaveServerOrigin() {
+        if (location.protocol.startsWith("http") && location.hostname) {
+          return `${location.protocol}//${location.hostname}:8787`;
+        }
+
+        return "http://localhost:8787";
+      }
+
+      function resetEditableLevel() {
+        applyLevelData(defaultLevel);
+        editor.template.visible = false;
+        editor.template.x = 0;
+        editor.template.y = 0;
+        editor.template.scale = 2.25;
+        editor.template.opacity = 0.45;
+        editor.selection = null;
+        syncEditorUi();
+        setEditorStatus("Reset");
+      }
+
+      function downloadLevelData() {
+        const json = JSON.stringify(createSaveData(), null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        const link = document.createElement("a");
+
+        link.href = URL.createObjectURL(blob);
+        link.download = `spritedemo-level-${Date.now()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(link.href);
+          link.remove();
+        }, 0);
+        setEditorStatus("Downloaded");
+      }
+
+      function setupEditorUi() {
+        editor.ui.root = document.getElementById("editor-ui");
+        editor.ui.toggle = document.getElementById("editor-toggle");
+        editor.ui.tool = document.getElementById("editor-tool");
+        editor.ui.template = document.getElementById("editor-template");
+        editor.ui.save = document.getElementById("editor-save");
+        editor.ui.load = document.getElementById("editor-load");
+        editor.ui.download = document.getElementById("editor-download");
+        editor.ui.snap = document.getElementById("editor-snap");
+        editor.ui.reset = document.getElementById("editor-reset");
+        editor.ui.delete = document.getElementById("editor-delete");
+        editor.ui.opacity = document.getElementById("template-opacity");
+        editor.ui.opacityValue = document.getElementById("template-opacity-value");
+        editor.ui.scale = document.getElementById("template-scale");
+        editor.ui.scaleValue = document.getElementById("template-scale-value");
+        editor.ui.status = document.getElementById("editor-status");
+
+        editor.ui.toggle.addEventListener("click", () => setEditorEnabled(!editor.enabled));
+        editor.ui.tool.addEventListener("change", () => {
+          editor.tool = editor.ui.tool.value;
+          setEditorStatus(editor.tool);
+        });
+        editor.ui.template.addEventListener("click", () => {
+          editor.template.visible = !editor.template.visible;
+          syncEditorUi();
+        });
+        editor.ui.save.addEventListener("click", () => void saveLevelToStorage());
+        editor.ui.load.addEventListener("click", () => void loadLevelFromStorage(false));
+        editor.ui.download.addEventListener("click", downloadLevelData);
+        editor.ui.snap.addEventListener("click", snapLevelToGrid);
+        editor.ui.reset.addEventListener("click", resetEditableLevel);
+        editor.ui.delete.addEventListener("click", deleteEditorSelection);
+        editor.ui.opacity.addEventListener("input", () => {
+          editor.template.opacity = Number(editor.ui.opacity.value);
+          syncEditorUi();
+        });
+        editor.ui.scale.addEventListener("input", () => {
+          editor.template.scale = Number(editor.ui.scale.value);
+          syncEditorUi();
+        });
+
+        syncEditorUi();
+      }
+
+      function setupEditorInput() {
+        canvas.addEventListener("pointerdown", handleEditorPointerDown);
+        canvas.addEventListener("pointermove", handleEditorPointerMove);
+        canvas.addEventListener("pointerup", handleEditorPointerUp);
+        canvas.addEventListener("pointercancel", handleEditorPointerUp);
+        canvas.addEventListener("contextmenu", event => event.preventDefault());
+      }
+
+      function setEditorEnabled(enabled) {
+        editor.enabled = enabled;
+        editor.pointer = null;
+        clearPlayInput();
+        editor.keys.left = false;
+        editor.keys.right = false;
+        player.slideDirection = null;
+        clearWallState();
+
+        if (!enabled) {
+          updateCamera();
+        }
+
+        syncEditorUi();
+        setEditorStatus(enabled ? "Edit" : "Play");
+      }
+
+      function syncEditorUi() {
+        if (!editor.ui.root) return;
+
+        editor.ui.root.classList.toggle("editing", editor.enabled);
+        editor.ui.toggle.classList.toggle("active", editor.enabled);
+        editor.ui.toggle.textContent = editor.enabled ? "Play" : "Edit";
+        editor.ui.tool.value = editor.tool;
+        editor.ui.template.classList.toggle("active", editor.template.visible);
+        editor.ui.opacity.value = String(editor.template.opacity);
+        editor.ui.opacityValue.textContent = editor.template.opacity.toFixed(2);
+        editor.ui.scale.value = String(editor.template.scale);
+        editor.ui.scaleValue.textContent = editor.template.scale.toFixed(2);
+      }
+
+      function setEditorStatus(message) {
+        if (!editor.ui.status) return;
+        editor.ui.status.textContent = message;
+      }
+
+      function handleEditorPointerDown(event) {
+        if (!editor.enabled) {
+          if (event.button === 0) attack(1);
+          if (event.button === 2) attack(2);
+          return;
+        }
+
+        if (!editor.enabled) return;
+
+        event.preventDefault();
+        canvas.setPointerCapture(event.pointerId);
+
+        const point = getEditorPoint(event);
+
+        if (editor.tool === "pan") {
+          beginEditorPan(event);
+          return;
+        }
+
+        if (editor.tool === "template") {
+          editor.template.visible = true;
+          editor.selection = { type: "template" };
+          editor.pointer = {
+            type: "move",
+            selection: editor.selection,
+            offsetX: point.worldX - editor.template.x,
+            offsetY: point.y - editor.template.y,
+          };
+          syncEditorUi();
+          return;
+        }
+
+        if (editor.tool === "select") {
+          const hit = hitTestEditor(point.worldX, point.y);
+          editor.selection = hit ? hit.selection : null;
+
+          if (!hit) {
+            beginEditorPan(event);
+            setEditorStatus("Pan");
+            return;
+          }
+
+          const anchor = getSelectionAnchor(editor.selection);
+          editor.pointer = {
+            type: "move",
+            selection: editor.selection,
+            offsetX: point.worldX - anchor.x,
+            offsetY: point.y - anchor.y,
+          };
+          setEditorStatus(hit.label);
+          return;
+        }
+
+        editor.selection = addEditorObject(editor.tool, point);
+        if (editor.selection) {
+          const anchor = getSelectionAnchor(editor.selection);
+          editor.pointer = {
+            type: "move",
+            selection: editor.selection,
+            offsetX: point.worldX - anchor.x,
+            offsetY: point.y - anchor.y,
+          };
+        }
+      }
+
+      function beginEditorPan(event) {
+        editor.pointer = {
+          type: "pan",
+          startX: event.clientX,
+          cameraX: game.cameraX,
+        };
+      }
+
+      function handleEditorPointerMove(event) {
+        if (!editor.enabled || !editor.pointer) return;
+
+        event.preventDefault();
+
+        if (editor.pointer.type === "pan") {
+          const deltaX = event.clientX - editor.pointer.startX;
+          game.cameraX = clamp(editor.pointer.cameraX - deltaX, 0, game.maxCameraX);
+          player.x = player.worldX - game.cameraX;
+          return;
+        }
+
+        if (editor.pointer.type === "move") {
+          const point = getEditorPoint(event);
+          moveEditorSelection(
+            editor.pointer.selection,
+            point.worldX - editor.pointer.offsetX,
+            point.y - editor.pointer.offsetY,
+          );
+        }
+      }
+
+      function handleEditorPointerUp(event) {
+        if (!editor.enabled) return;
+
+        event.preventDefault();
+        editor.pointer = null;
+
+        if (canvas.hasPointerCapture(event.pointerId)) {
+          canvas.releasePointerCapture(event.pointerId);
+        }
+      }
+
+      function getEditorPoint(event) {
+        const bounds = canvas.getBoundingClientRect();
+        const x = event.clientX - bounds.left;
+        const y = event.clientY - bounds.top;
+
+        return {
+          x,
+          y,
+          worldX: game.cameraX + x,
+        };
+      }
+
+      function addEditorObject(tool, point) {
+        const x = snapWorld(point.worldX);
+        const yOffset = snapWorld(point.y - game.groundY);
+
+        if (tool === "rock") {
+          level.platforms.push({ kind: "rock", x, yOffset, columns: 6, rows: 4 });
+          updateLevelGeometry();
+          setEditorStatus("Rock");
+          return { collection: "platforms", index: level.platforms.length - 1 };
+        }
+
+        if (tool === "thin") {
+          level.platforms.push({ kind: "thin", x, yOffset, columns: 5 });
+          updateLevelGeometry();
+          setEditorStatus("Grass");
+          return { collection: "platforms", index: level.platforms.length - 1 };
+        }
+
+        if (tool === "scenic") {
+          level.scenicPlatforms.push({ kind: "rock", x, yOffset, columns: 4, rows: 3 });
+          updateLevelGeometry();
+          setEditorStatus("Scenic");
+          return { collection: "scenicPlatforms", index: level.scenicPlatforms.length - 1 };
+        }
+
+        if (tool === "tree") {
+          level.trees.push({ frame: level.trees.length % 2, x, yOffset, scale: 1.8 });
+          setEditorStatus("Tree");
+          return { collection: "trees", index: level.trees.length - 1 };
+        }
+
+        if (tool === "bush" || tool === "fence" || tool === "spikes" || tool === "bridge") {
+          const decoration = { kind: tool, x, yOffset };
+          if (tool === "spikes") decoration.count = 2;
+          if (tool === "bridge") decoration.pieces = 1;
+          level.decorations.push(decoration);
+          setEditorStatus(tool);
+          return { collection: "decorations", index: level.decorations.length - 1 };
+        }
+
+        return null;
+      }
+
+      function hitTestEditor(worldX, y) {
+        const items = getEditableItems();
+
+        for (let index = items.length - 1; index >= 0; index -= 1) {
+          const item = items[index];
+          const bounds = item.bounds;
+
+          if (
+            worldX >= bounds.x &&
+            worldX <= bounds.x + bounds.width &&
+            y >= bounds.y &&
+            y <= bounds.y + bounds.height
+          ) {
+            return item;
+          }
+        }
+
+        return null;
+      }
+
+      function getEditableItems() {
+        const items = [];
+
+        if (editor.template.visible && foreground.mockup.image) {
+          items.push({
+            label: "Template",
+            selection: { type: "template" },
+            bounds: getTemplateBounds(),
+          });
+        }
+
+        level.scenicPlatforms.forEach((platform, index) => {
+          items.push({
+            label: "Scenic",
+            selection: { collection: "scenicPlatforms", index },
+            bounds: getPlatformBounds(platform),
+          });
+        });
+
+        level.platforms.forEach((platform, index) => {
+          items.push({
+            label: platform.kind,
+            selection: { collection: "platforms", index },
+            bounds: getPlatformBounds(platform),
+          });
+        });
+
+        level.trees.forEach((tree, index) => {
+          items.push({ label: "Tree", selection: { collection: "trees", index }, bounds: getTreeBounds(tree) });
+        });
+
+        level.decorations.forEach((decoration, index) => {
+          items.push({
+            label: decoration.kind,
+            selection: { collection: "decorations", index },
+            bounds: getDecorationBounds(decoration),
+          });
+        });
+
+        return items;
+      }
+
+      function getTreeBounds(tree) {
+        const width = 128 * tree.scale;
+        const height = 128 * tree.scale;
+
+        return {
+          x: tree.x - width / 2,
+          y: game.groundY + tree.yOffset - height + 11 * tree.scale,
+          width,
+          height,
+        };
+      }
+
+      function getDecorationBounds(decoration) {
+        const surfaceY = game.groundY + decoration.yOffset;
+
+        if (decoration.kind === "bush") {
+          return {
+            x: decoration.x,
+            y: surfaceY - WORLD_TILE_SIZE * 0.72,
+            width: WORLD_TILE_SIZE * 3,
+            height: WORLD_TILE_SIZE * 0.72,
+          };
+        }
+
+        if (decoration.kind === "spikes") {
+          return {
+            x: decoration.x,
+            y: surfaceY - WORLD_TILE_SIZE,
+            width: (decoration.count || 1) * WORLD_TILE_SIZE,
+            height: WORLD_TILE_SIZE,
+          };
+        }
+
+        if (decoration.kind === "bridge") {
+          return {
+            x: decoration.x,
+            y: surfaceY - WORLD_TILE_SIZE * 0.85,
+            width: (decoration.pieces || 1) * WORLD_TILE_SIZE * 3,
+            height: WORLD_TILE_SIZE,
+          };
+        }
+
+        return { x: decoration.x, y: surfaceY - WORLD_TILE_SIZE, width: WORLD_TILE_SIZE * 3, height: WORLD_TILE_SIZE };
+      }
+
+      function getTemplateBounds() {
+        const image = foreground.mockup.image;
+
+        return {
+          x: editor.template.x,
+          y: editor.template.y,
+          width: image ? image.width * editor.template.scale : 0,
+          height: image ? image.height * editor.template.scale : 0,
+        };
+      }
+
+      function getSelectionAnchor(selection) {
+        if (selection.type === "template") {
+          return { x: editor.template.x, y: editor.template.y };
+        }
+
+        const object = getSelectedObject(selection);
+        if (!object) return { x: 0, y: 0 };
+
+        return { x: object.x, y: game.groundY + object.yOffset };
+      }
+
+      function moveEditorSelection(selection, x, y) {
+        if (selection.type === "template") {
+          editor.template.x = Math.round(x);
+          editor.template.y = Math.round(y);
+          return;
+        }
+
+        const object = getSelectedObject(selection);
+        if (!object) return;
+
+        object.x = snapWorld(x);
+        object.yOffset = snapWorld(y - game.groundY);
+
+        if (selection.collection === "platforms" || selection.collection === "scenicPlatforms") {
+          updateLevelGeometry();
+        }
+      }
+
+      function getSelectedObject(selection = editor.selection) {
+        if (!selection || !selection.collection) return null;
+        return level[selection.collection]?.[selection.index] || null;
+      }
+
+      function deleteEditorSelection() {
+        if (!editor.selection) return;
+
+        if (editor.selection.type === "template") {
+          editor.template.visible = false;
+          editor.selection = null;
+          syncEditorUi();
+          setEditorStatus("Template hidden");
+          return;
+        }
+
+        const collection = level[editor.selection.collection];
+        if (!collection) return;
+
+        collection.splice(editor.selection.index, 1);
+        editor.selection = null;
+        updateLevelGeometry();
+        setEditorStatus("Deleted");
+      }
+
+      function snapLevelToGrid() {
+        level.width = Math.max(WORLD_TILE_SIZE, snapWorld(level.width));
+        level.startX = snapWorld(level.startX);
+        level.finishX = snapWorld(level.finishX);
+
+        for (const platform of [...level.platforms, ...level.scenicPlatforms]) {
+          platform.x = snapWorld(platform.x);
+          platform.yOffset = snapWorld(platform.yOffset);
+        }
+
+        for (const tree of level.trees) {
+          tree.x = snapWorld(tree.x);
+          tree.yOffset = snapWorld(tree.yOffset);
+        }
+
+        for (const decoration of level.decorations) {
+          decoration.x = snapWorld(decoration.x);
+          decoration.yOffset = snapWorld(decoration.yOffset);
+        }
+
+        player.worldX = clamp(snapWorld(player.worldX), 40, level.width - 40);
+        game.maxCameraX = Math.max(level.width - game.width, 0);
+        updateLevelGeometry();
+        updateCamera();
+        setEditorStatus("Snapped");
+      }
+
+      function snapWorld(value) {
+        return Math.round(value / WORLD_TILE_SIZE) * WORLD_TILE_SIZE;
+      }
+
+      function resize() {
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        game.width = window.innerWidth;
+        game.height = window.innerHeight;
+        game.groundY = Math.round(game.height * 0.74);
+        game.maxCameraX = Math.max(level.width - game.width, 0);
+
+        canvas.width = Math.floor(game.width * ratio);
+        canvas.height = Math.floor(game.height * ratio);
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.imageSmoothingEnabled = false;
+        updateBackgroundLayout();
+        updateLevelGeometry();
+
+        if (player.worldX === 0) {
+          player.worldX = level.startX;
+        }
+
+        player.worldX = clamp(player.worldX, 40, level.width - 40);
+
+        if (player.onGround || player.y === 0) {
+          player.y = game.groundY;
+        }
+
+        updateCamera();
+      }
+
+      function updateBackgroundLayout() {
+        for (const layer of backgroundLayers) {
+          if (!layer.image) continue;
+
+          const scale = Math.max(game.width / layer.image.width, game.height / layer.image.height);
+          layer.drawWidth = Math.ceil(layer.image.width * scale);
+          layer.drawHeight = Math.ceil(layer.image.height * scale);
+          layer.drawY = Math.round(game.height - layer.drawHeight);
+        }
+      }
+
+      function updateLevelGeometry() {
+        for (const platform of [...level.platforms, ...level.scenicPlatforms]) {
+          const rows = platform.kind === "thin" ? 1 : platform.rows;
+          platform.worldY = game.groundY + platform.yOffset;
+          platform.width = platform.columns * WORLD_TILE_SIZE;
+          platform.height = rows * WORLD_TILE_SIZE;
+          platform.right = platform.x + platform.width;
+        }
+      }
+
+      async function loadSprite(sprite) {
+        const image = await loadImage(sprite.src);
+
+        if (!sprite.removeBlackBackground) {
+          sprite.image = image;
+          return;
+        }
+
+        sprite.image = removeBlackPixels(image, 24);
+      }
+
+      async function loadBackgroundLayer(layer) {
+        layer.image = await loadImage(layer.src);
+      }
+
+      async function loadImageAsset(asset) {
+        asset.image = await loadImage(asset.src);
+      }
+
+      function loadImage(src) {
+        return new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = reject;
+          image.src = src;
+        });
+      }
+
+      function removeBlackPixels(image, tolerance) {
+        const sheet = document.createElement("canvas");
+        const sheetContext = sheet.getContext("2d");
+        sheet.width = image.naturalWidth || image.width;
+        sheet.height = image.naturalHeight || image.height;
+        sheetContext.drawImage(image, 0, 0);
+
+        const pixels = sheetContext.getImageData(0, 0, sheet.width, sheet.height);
+        const data = pixels.data;
+
+        for (let index = 0; index < data.length; index += 4) {
+          if (data[index] <= tolerance && data[index + 1] <= tolerance && data[index + 2] <= tolerance) {
+            data[index + 3] = 0;
+          }
+        }
+
+        sheetContext.putImageData(pixels, 0, 0);
+        return sheet;
+      }
+
+      function updateInputFromGamepad() {
+        const gamepads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+        const gamepad = gamepads.find(candidate => candidate && candidate.connected);
+        const previousButtons = gamepadInput.buttons;
+        const previousDown = gamepadInput.previousDown;
+
+        if (!gamepad) {
+          gamepadInput.left = false;
+          gamepadInput.right = false;
+          gamepadInput.up = false;
+          gamepadInput.down = false;
+          gamepadInput.previousDown = false;
+          gamepadInput.buttons = [];
+          mergeInputSources();
+          return;
+        }
+
+        const horizontal = applyDeadzone(gamepad.axes[0] || 0, 0.35);
+        const vertical = applyDeadzone(gamepad.axes[1] || 0, 0.35);
+
+        gamepadInput.left = horizontal < 0 || isGamepadButtonDown(gamepad, 14);
+        gamepadInput.right = horizontal > 0 || isGamepadButtonDown(gamepad, 15);
+        gamepadInput.up = vertical < 0 || isGamepadButtonDown(gamepad, 12);
+        gamepadInput.down = vertical > 0 || isGamepadButtonDown(gamepad, 13);
+        gamepadInput.buttons = gamepad.buttons.map(button => button.pressed);
+        gamepadInput.previousDown = gamepadInput.down;
+
+        mergeInputSources();
+
+        if (editor.enabled) return;
+
+        if (wasGamepadButtonPressed(previousButtons, 0)) jump();
+        if (wasGamepadButtonPressed(previousButtons, 1)) roll();
+        if (wasGamepadButtonPressed(previousButtons, 2)) attack(1);
+        if (wasGamepadButtonPressed(previousButtons, 3)) attack(2);
+        if (wasGamepadButtonPressed(previousButtons, 5)) attack(3);
+        if (gamepadInput.down && !previousDown) startDownAction();
+      }
+
+      function mergeInputSources() {
+        input.left = keyboardInput.left || gamepadInput.left;
+        input.right = keyboardInput.right || gamepadInput.right;
+        input.up = keyboardInput.up || gamepadInput.up;
+        input.down = keyboardInput.down || gamepadInput.down;
+      }
+
+      function clearPlayInput() {
+        keyboardInput.left = false;
+        keyboardInput.right = false;
+        keyboardInput.up = false;
+        keyboardInput.down = false;
+        gamepadInput.left = false;
+        gamepadInput.right = false;
+        gamepadInput.up = false;
+        gamepadInput.down = false;
+        gamepadInput.previousDown = false;
+        input.left = false;
+        input.right = false;
+        input.up = false;
+        input.down = false;
+      }
+
+      function applyDeadzone(value, deadzone) {
+        if (Math.abs(value) < deadzone) return 0;
+        return value;
+      }
+
+      function isGamepadButtonDown(gamepad, index) {
+        return Boolean(gamepad.buttons[index]?.pressed);
+      }
+
+      function wasGamepadButtonPressed(previousButtons, index) {
+        return Boolean(gamepadInput.buttons[index]) && !Boolean(previousButtons[index]);
+      }
+
+      function startDownAction() {
+        if (Number(input.right) - Number(input.left) !== 0 && !isCrouchAnimation(player.animation)) {
+          startSlide();
+        } else {
+          startCrouch();
+        }
+      }
+
+      function update(deltaSeconds) {
+        const moveDirection = Number(input.right) - Number(input.left);
+        const previousY = player.y;
+
+        if (player.wallMount) {
+          updateWallMount(deltaSeconds);
+          updateCamera();
+          player.animationTime += deltaSeconds;
+          return;
+        }
+
+        const rolling = player.animation === "roll";
+        const sliding = isSlideAnimation(player.animation);
+        const crouching = isCrouchAnimation(player.animation);
+        const attacking = isAttackAnimation(player.animation);
+
+        if (rolling) {
+          player.velocityX = (player.rollDirection || player.facing) * player.rollSpeed;
+        } else if (sliding) {
+          player.velocityX = (player.slideDirection || player.facing) * player.slideSpeed;
+        } else if (attacking) {
+          player.velocityX = 0;
+        } else if (crouching) {
+          player.velocityX = moveDirection * player.crouchSpeed;
+
+          if (moveDirection !== 0) {
+            player.facing = moveDirection;
+          }
+        } else {
+          player.velocityX = moveDirection * player.speed;
+          updateTurnIntent(moveDirection);
+        }
+
+        player.worldX += player.velocityX * deltaSeconds;
+        player.worldX = clamp(player.worldX, 40, level.width - 40);
+
+        player.velocityY += player.gravity * deltaSeconds;
+        player.y += player.velocityY * deltaSeconds;
+
+        resolveVerticalCollisions(previousY);
+
+        if (!player.onGround && player.turnTargetFacing !== null) {
+          player.facing = player.turnTargetFacing;
+          player.turnTargetFacing = null;
+        }
+
+        if (!player.onGround && player.rollDirection !== null) {
+          player.rollDirection = null;
+        }
+
+        if (!player.onGround && player.slideDirection !== null) {
+          player.slideDirection = null;
+        }
+
+        if (!player.onGround && crouching) {
+          player.crouchTarget = null;
+        }
+
+        if (!player.onGround && attacking) {
+          player.attackQueued = null;
+        }
+
+        if (!player.onGround && !rolling && !sliding && !crouching && !attacking) {
+          tryStartWallClimb(moveDirection);
+        }
+
+        if (player.y > game.height + 240) {
+          resetPlayer();
+        }
+
+        updateCamera();
+
+        setPlayerAnimation(getPlayerAnimation());
+        player.animationTime += deltaSeconds;
+        finishAttackIfNeeded();
+        finishTurnIfNeeded();
+        finishCrouchIfNeeded();
+        finishRollIfNeeded();
+        finishSlideIfNeeded();
+      }
+
+      function updateWallMount(deltaSeconds) {
+        const mount = player.wallMount;
+        mount.elapsed += deltaSeconds;
+
+        const progress = clamp(mount.elapsed / mount.duration, 0, 1);
+        const eased = progress * progress * (3 - 2 * progress);
+
+        player.onGround = false;
+        player.facing = mount.direction;
+        player.velocityX = 0;
+        player.velocityY = 0;
+        player.worldX = lerp(mount.startX, mount.endX, eased);
+        player.y = lerp(mount.startY, mount.endY, eased);
+
+        if (progress >= 1) {
+          player.worldX = mount.endX;
+          player.y = mount.endY;
+          player.onGround = true;
+          clearWallState();
+          setPlayerAnimation(getPlayerAnimation());
+        }
+      }
+
+      function tryStartWallClimb(moveDirection) {
+        if (moveDirection === 0 || player.velocityY < -220) return false;
+
+        const contact = findWallContact(moveDirection);
+        if (!contact) return false;
+
+        player.velocityX = 0;
+        player.velocityY = 0;
+        player.rollDirection = null;
+        player.slideDirection = null;
+        player.turnTargetFacing = null;
+        player.facing = contact.direction;
+        placePlayerOnWall(contact.platform, contact.direction);
+        startWallMount(contact.platform, contact.direction);
+        return true;
+      }
+
+      function findWallContact(direction) {
+        for (const platform of level.platforms) {
+          const wallX = direction > 0 ? platform.x : platform.right;
+          const distance = Math.abs(player.worldX - wallX);
+          const withinWallHeight = player.y > platform.worldY + 34 && player.y < platform.worldY + platform.height + 28;
+
+          if (distance <= 32 && withinWallHeight) {
+            return { direction, platform };
+          }
+        }
+
+        return null;
+      }
+
+      function placePlayerOnWall(platform, direction) {
+        const wallX = direction > 0 ? platform.x : platform.right;
+        player.worldX = wallX - direction * (player.colliderWidth / 2 + 3);
+      }
+
+      function startWallMount(platform, direction) {
+        const endX = direction > 0 ? platform.x + WORLD_TILE_SIZE : platform.right - WORLD_TILE_SIZE;
+        const endY = platform.worldY;
+        const duration = sprites.wallClimb.frameCount / sprites.wallClimb.fps;
+
+        player.wallMount = {
+          direction,
+          startX: player.worldX,
+          startY: player.y,
+          endX,
+          endY,
+          duration,
+          elapsed: 0,
+        };
+        setPlayerAnimation("wallClimb");
+      }
+
+      function clearWallState() {
+        player.wallMount = null;
+      }
+
+      function lerp(start, end, amount) {
+        return start + (end - start) * amount;
+      }
+
+      function updateTurnIntent(moveDirection) {
+        if (moveDirection === 0) return;
+
+        if (!player.onGround) {
+          player.facing = moveDirection;
+          player.turnTargetFacing = null;
+          return;
+        }
+
+        if (player.animation === "turn") {
+          if (moveDirection === player.facing) {
+            player.turnTargetFacing = null;
+            setPlayerAnimation("run");
+            return;
+          }
+
+          player.turnTargetFacing = moveDirection;
+          return;
+        }
+
+        if (moveDirection !== player.facing) {
+          player.turnTargetFacing = moveDirection;
+          setPlayerAnimation("turn");
+        }
+      }
+
+      function finishTurnIfNeeded() {
+        if (player.animation !== "turn") return;
+
+        const sprite = sprites.turn;
+        const duration = sprite.frameCount / sprite.fps;
+
+        if (player.animationTime < duration) return;
+
+        player.facing = player.turnTargetFacing ?? player.facing;
+        player.turnTargetFacing = null;
+        setPlayerAnimation(getPlayerAnimation());
+      }
+
+      function finishAttackIfNeeded() {
+        if (!isAttackAnimation(player.animation)) return;
+
+        const sprite = sprites[player.animation];
+        const duration = sprite.frameCount / sprite.fps;
+
+        if (player.animationTime < duration) return;
+
+        if (player.animation === "attack" && player.attackQueued === "attack2") {
+          player.attackQueued = null;
+          setPlayerAnimation("attack2");
+          return;
+        }
+
+        player.attackQueued = null;
+        player.animation = "";
+        setPlayerAnimation(getPlayerAnimation());
+      }
+
+      function finishCrouchIfNeeded() {
+        if (!isCrouchAnimation(player.animation)) return;
+
+        const moveDirection = Number(input.right) - Number(input.left);
+
+        if (!player.onGround) {
+          player.crouchTarget = null;
+          setPlayerAnimation(getPlayerAnimation());
+          return;
+        }
+
+        if (player.animation === "crouchTransition") {
+          const duration = sprites.crouchTransition.frameCount / sprites.crouchTransition.fps;
+
+          if (!input.down) {
+            player.crouchTarget = "stand";
+          }
+
+          if (player.animationTime < duration) return;
+
+          if (player.crouchTarget === "stand") {
+            player.crouchTarget = null;
+            setPlayerAnimation(moveDirection !== 0 ? "run" : "idle");
+          } else {
+            player.crouchTarget = null;
+            setPlayerAnimation(moveDirection !== 0 ? "crouchWalk" : "crouch");
+          }
+
+          return;
+        }
+
+        if (!input.down) {
+          player.crouchTarget = "stand";
+          setPlayerAnimation("crouchTransition");
+          return;
+        }
+
+        setPlayerAnimation(moveDirection !== 0 ? "crouchWalk" : "crouch");
+      }
+
+      function finishRollIfNeeded() {
+        if (player.animation !== "roll") return;
+
+        const sprite = sprites.roll;
+        const duration = sprite.frameCount / sprite.fps;
+
+        if (player.animationTime < duration) return;
+
+        player.rollDirection = null;
+        player.velocityX = (Number(input.right) - Number(input.left)) * player.speed;
+        setPlayerAnimation(getPlayerAnimation());
+      }
+
+      function finishSlideIfNeeded() {
+        if (!isSlideAnimation(player.animation)) return;
+
+        if (!player.onGround) {
+          player.slideDirection = null;
+          setPlayerAnimation(getPlayerAnimation());
+          return;
+        }
+
+        if (player.animation === "slideStart") {
+          const duration = sprites.slideStart.frameCount / sprites.slideStart.fps;
+
+          if (player.animationTime >= duration) {
+            setPlayerAnimation(input.down ? "slide" : "slideEnd");
+          }
+
+          return;
+        }
+
+        if (player.animation === "slide" && !input.down) {
+          setPlayerAnimation("slideEnd");
+          return;
+        }
+
+        if (player.animation === "slideEnd") {
+          const duration = sprites.slideEnd.frameCount / sprites.slideEnd.fps;
+
+          if (player.animationTime >= duration) {
+            player.slideDirection = null;
+            player.velocityX = (Number(input.right) - Number(input.left)) * player.speed;
+            setPlayerAnimation(getPlayerAnimation());
+          }
+        }
+      }
+
+      function isSlideAnimation(animation) {
+        return animation === "slideStart" || animation === "slide" || animation === "slideEnd";
+      }
+
+      function updateEditor(deltaSeconds) {
+        const panDirection = Number(editor.keys.right) - Number(editor.keys.left);
+
+        if (panDirection !== 0) {
+          game.cameraX = clamp(game.cameraX + panDirection * editor.panSpeed * deltaSeconds, 0, game.maxCameraX);
+          player.x = player.worldX - game.cameraX;
+        }
+
+        player.velocityX = 0;
+        player.velocityY = 0;
+        player.turnTargetFacing = null;
+        player.crouchTarget = null;
+        player.attackQueued = null;
+        player.rollDirection = null;
+        player.slideDirection = null;
+        clearWallState();
+        setPlayerAnimation("idle");
+        player.animationTime += deltaSeconds;
+      }
+
+      function resolveVerticalCollisions(previousY) {
+        player.onGround = false;
+
+        if (player.velocityY < 0) return;
+
+        const playerLeft = player.worldX - player.colliderWidth / 2;
+        const playerRight = player.worldX + player.colliderWidth / 2;
+
+        for (const platform of level.platforms) {
+          const withinPlatform = playerRight > platform.x + 8 && playerLeft < platform.right - 8;
+          const crossedTop = previousY <= platform.worldY && player.y >= platform.worldY;
+
+          if (withinPlatform && crossedTop) {
+            player.y = platform.worldY;
+            player.velocityY = 0;
+            player.onGround = true;
+            break;
+          }
+        }
+      }
+
+      function getPlatformBounds(platform) {
+        return {
+          x: platform.x,
+          y: platform.worldY,
+          width: platform.width,
+          height: platform.height,
+        };
+      }
+
+      function updateCamera() {
+        game.cameraX = clamp(player.worldX - game.width * 0.42, 0, game.maxCameraX);
+        player.x = player.worldX - game.cameraX;
+      }
+
+      function resetPlayer() {
+        player.worldX = level.startX;
+        player.y = game.groundY;
+        player.velocityX = 0;
+        player.velocityY = 0;
+        player.onGround = true;
+        player.turnTargetFacing = null;
+        player.crouchTarget = null;
+        player.attackQueued = null;
+        player.rollDirection = null;
+        player.slideDirection = null;
+        clearWallState();
+        updateCamera();
+      }
+
+      function getPlayerAnimation() {
+        if (player.wallMount) {
+          return "wallClimb";
+        }
+
+        if (isAttackAnimation(player.animation) && player.onGround) {
+          return player.animation;
+        }
+
+        if (isCrouchAnimation(player.animation) && player.onGround) {
+          return player.animation;
+        }
+
+        if (isSlideAnimation(player.animation) && player.slideDirection !== null && player.onGround) {
+          return player.animation;
+        }
+
+        if (player.animation === "roll" && player.rollDirection !== null && player.onGround) {
+          return "roll";
+        }
+
+        if (player.animation === "turn" && player.turnTargetFacing !== null && player.onGround) {
+          return "turn";
+        }
+
+        if (!player.onGround) {
+          return player.velocityY < 0 ? "jump" : "fall";
+        }
+
+        if (Math.abs(player.velocityX) > 1) {
+          return "run";
+        }
+
+        return "idle";
+      }
+
+      function setPlayerAnimation(animation) {
+        if (player.animation === animation) return;
+
+        player.animation = animation;
+        player.animationTime = 0;
+      }
+
+      function jump() {
+        if (
+          !player.onGround ||
+          isAttackAnimation(player.animation) ||
+          isCrouchAnimation(player.animation) ||
+          player.animation === "roll" ||
+          isSlideAnimation(player.animation) ||
+          isWallAnimation(player.animation)
+        )
+          return;
+
+        player.velocityY = player.jumpVelocity;
+        player.onGround = false;
+        player.rollDirection = null;
+        player.slideDirection = null;
+        clearWallState();
+        setPlayerAnimation("jump");
+      }
+
+      function roll() {
+        if (
+          !player.onGround ||
+          isAttackAnimation(player.animation) ||
+          isCrouchAnimation(player.animation) ||
+          player.animation === "roll" ||
+          isSlideAnimation(player.animation) ||
+          isWallAnimation(player.animation)
+        )
+          return;
+
+        const moveDirection = Number(input.right) - Number(input.left);
+        const direction = moveDirection || player.turnTargetFacing || player.facing;
+
+        player.rollDirection = direction;
+        player.facing = direction;
+        player.turnTargetFacing = null;
+        player.velocityY = 0;
+        setPlayerAnimation("roll");
+      }
+
+      function startSlide() {
+        if (
+          !player.onGround ||
+          isAttackAnimation(player.animation) ||
+          isCrouchAnimation(player.animation) ||
+          player.animation === "roll" ||
+          isSlideAnimation(player.animation) ||
+          isWallAnimation(player.animation)
+        )
+          return;
+
+        const moveDirection = Number(input.right) - Number(input.left);
+        const direction = moveDirection || player.turnTargetFacing || player.facing;
+
+        player.slideDirection = direction;
+        player.facing = direction;
+        player.turnTargetFacing = null;
+        player.rollDirection = null;
+        player.velocityY = 0;
+        setPlayerAnimation("slideStart");
+      }
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function attack(type) {
+        if (
+          !player.onGround ||
+          player.wallMount ||
+          player.animation === "roll" ||
+          isSlideAnimation(player.animation) ||
+          isCrouchAnimation(player.animation)
+        )
+          return;
+
+        const attackName = type === 3 ? "attackCombo" : type === 2 ? "attack2" : "attack";
+        const moveDirection = Number(input.right) - Number(input.left);
+
+        if (moveDirection !== 0) {
+          player.facing = moveDirection;
+        }
+
+        if (player.animation === "attack" && attackName === "attack2") {
+          player.attackQueued = "attack2";
+          return;
+        }
+
+        if (isAttackAnimation(player.animation)) return;
+
+        player.attackQueued = null;
+        player.turnTargetFacing = null;
+        player.crouchTarget = null;
+        player.rollDirection = null;
+        player.slideDirection = null;
+        player.velocityX = 0;
+        player.velocityY = 0;
+        setPlayerAnimation(attackName);
+      }
+
+      function isAttackAnimation(animation) {
+        return animation === "attack" || animation === "attack2" || animation === "attackCombo";
+      }
+
+      function startCrouch() {
+        if (
+          !player.onGround ||
+          isAttackAnimation(player.animation) ||
+          player.animation === "roll" ||
+          isSlideAnimation(player.animation) ||
+          isWallAnimation(player.animation)
+        )
+          return;
+
+        if (isCrouchAnimation(player.animation)) return;
+
+        player.crouchTarget = "crouch";
+        player.turnTargetFacing = null;
+        player.rollDirection = null;
+        player.slideDirection = null;
+        player.velocityY = 0;
+        setPlayerAnimation("crouchTransition");
+      }
+
+      function isCrouchAnimation(animation) {
+        return animation === "crouchTransition" || animation === "crouch" || animation === "crouchWalk";
+      }
+
+      function isWallAnimation(animation) {
+        return animation === "wallClimb";
+      }
+
+      function draw() {
+        drawBackground();
+        drawTemplate();
+        drawLevel();
+        drawPlayer();
+        drawEditorOverlay();
+      }
+
+      function drawBackground() {
+        context.fillStyle = "#6bcbd3";
+        context.fillRect(0, 0, game.width, game.height);
+
+        for (const layer of backgroundLayers) {
+          drawBackgroundLayer(layer);
+        }
+      }
+
+      function drawBackgroundLayer(layer) {
+        if (!layer.image || layer.drawWidth === 0) return;
+
+        const offsetX = positiveModulo(player.worldX * layer.parallax, layer.drawWidth);
+
+        for (let x = -offsetX - layer.drawWidth; x < game.width + layer.drawWidth; x += layer.drawWidth) {
+          context.drawImage(layer.image, Math.round(x), layer.drawY, layer.drawWidth, layer.drawHeight);
+        }
+      }
+
+      function positiveModulo(value, divisor) {
+        return ((value % divisor) + divisor) % divisor;
+      }
+
+      function drawTemplate() {
+        if (!editor.enabled || !editor.template.visible || !foreground.mockup.image) return;
+
+        const width = foreground.mockup.image.width * editor.template.scale;
+        const height = foreground.mockup.image.height * editor.template.scale;
+
+        context.save();
+        context.globalAlpha = editor.template.opacity;
+        context.drawImage(
+          foreground.mockup.image,
+          Math.round(worldToScreenX(editor.template.x)),
+          Math.round(editor.template.y),
+          width,
+          height,
+        );
+        context.restore();
+      }
+
+      function drawLevel() {
+        drawScenicPlatforms();
+        drawTrees();
+
+        for (const platform of level.platforms) {
+          if (platform.kind === "thin") {
+            drawThinPlatform(platform);
+          } else {
+            drawRockPlatform(platform);
+          }
+        }
+
+        drawDecorations();
+      }
+
+      function drawScenicPlatforms() {
+        for (const platform of level.scenicPlatforms) {
+          drawRockPlatform(platform);
+        }
+      }
+
+      function drawTrees() {
+        if (!foreground.trees.image) return;
+
+        for (const tree of level.trees) {
+          const sourceX = tree.frame * 128;
+          const drawWidth = 128 * tree.scale;
+          const drawHeight = 128 * tree.scale;
+          const screenX = worldToScreenX(tree.x) - drawWidth / 2;
+          const screenY = game.groundY + tree.yOffset - drawHeight + 11 * tree.scale;
+
+          if (screenX > game.width || screenX + drawWidth < 0) continue;
+
+          context.drawImage(
+            foreground.trees.image,
+            sourceX,
+            0,
+            128,
+            128,
+            Math.round(screenX),
+            Math.round(screenY),
+            Math.round(drawWidth),
+            Math.round(drawHeight),
+          );
+        }
+      }
+
+      function drawRockPlatform(platform) {
+        if (!isWorldRectVisible(platform.x, platform.width)) return;
+
+        for (let row = 0; row < platform.rows; row += 1) {
+          for (let column = 0; column < platform.columns; column += 1) {
+            const source = getRockTile(column, row, platform.columns, platform.rows);
+            drawTile(
+              source.x,
+              source.y,
+              platform.x + column * WORLD_TILE_SIZE,
+              platform.worldY + row * WORLD_TILE_SIZE,
+            );
+          }
+        }
+      }
+
+      function getRockTile(column, row, columns, rows) {
+        const tileX = column === 0 ? 0 : column === columns - 1 ? 2 : 1;
+        const tileY = row === 0 ? 0 : row === rows - 1 ? 2 : 1;
+        return { x: tileX, y: tileY };
+      }
+
+      function drawThinPlatform(platform) {
+        if (!isWorldRectVisible(platform.x, platform.width)) return;
+
+        for (let column = 0; column < platform.columns; column += 1) {
+          const tileX = column === 0 ? 6 : column === platform.columns - 1 ? 9 : column % 2 === 0 ? 8 : 7;
+          drawTile(tileX, 2, platform.x + column * WORLD_TILE_SIZE, platform.worldY);
+        }
+      }
+
+      function isWorldRectVisible(worldX, width) {
+        const screenX = worldToScreenX(worldX);
+        return screenX <= game.width && screenX + width >= 0;
+      }
+
+      function drawDecorations() {
+        if (!foreground.tileset.image) return;
+
+        for (const decoration of level.decorations) {
+          const surfaceY = game.groundY + decoration.yOffset;
+
+          if (decoration.kind === "fence") {
+            drawTilesetRegion(6, 3, 3, 1, decoration.x, surfaceY - WORLD_TILE_SIZE);
+          }
+
+          if (decoration.kind === "bush") {
+            drawTilesetRegion(5, 5, 3, 1, decoration.x, surfaceY - WORLD_TILE_SIZE * 0.72);
+          }
+
+          if (decoration.kind === "spikes") {
+            for (let index = 0; index < decoration.count; index += 1) {
+              drawTilesetRegion(9, 3, 1, 1, decoration.x + index * WORLD_TILE_SIZE, surfaceY - WORLD_TILE_SIZE);
+            }
+          }
+
+          if (decoration.kind === "bridge") {
+            for (let index = 0; index < decoration.pieces; index += 1) {
+              drawTilesetRegion(
+                6,
+                3,
+                3,
+                1,
+                decoration.x + index * WORLD_TILE_SIZE * 3,
+                surfaceY - WORLD_TILE_SIZE * 0.85,
+              );
+            }
+          }
+        }
+      }
+
+      function drawTile(tileX, tileY, worldX, worldY) {
+        drawTilesetRegion(tileX, tileY, 1, 1, worldX, worldY);
+      }
+
+      function drawTilesetRegion(tileX, tileY, tilesWide, tilesHigh, worldX, worldY) {
+        if (!foreground.tileset.image) return;
+
+        const width = tilesWide * WORLD_TILE_SIZE;
+        const height = tilesHigh * WORLD_TILE_SIZE;
+        const screenX = worldToScreenX(worldX);
+
+        if (screenX > game.width || screenX + width < 0) return;
+
+        context.drawImage(
+          foreground.tileset.image,
+          tileX * TILE_SIZE,
+          tileY * TILE_SIZE,
+          tilesWide * TILE_SIZE,
+          tilesHigh * TILE_SIZE,
+          Math.round(screenX),
+          Math.round(worldY),
+          Math.round(width),
+          Math.round(height),
+        );
+      }
+
+      function worldToScreenX(worldX) {
+        return worldX - game.cameraX;
+      }
+
+      function drawEditorOverlay() {
+        if (!editor.enabled) return;
+
+        drawEditorGrid();
+        drawEditorSelection();
+      }
+
+      function drawEditorGrid() {
+        const startX = -positiveModulo(game.cameraX, WORLD_TILE_SIZE);
+        const startY = game.groundY - Math.ceil(game.groundY / WORLD_TILE_SIZE) * WORLD_TILE_SIZE;
+
+        context.save();
+        context.strokeStyle = "rgba(255, 255, 255, 0.12)";
+        context.lineWidth = 1;
+
+        for (let x = startX; x <= game.width; x += WORLD_TILE_SIZE) {
+          context.beginPath();
+          context.moveTo(Math.round(x) + 0.5, 0);
+          context.lineTo(Math.round(x) + 0.5, game.height);
+          context.stroke();
+        }
+
+        for (let y = startY; y <= game.height; y += WORLD_TILE_SIZE) {
+          context.beginPath();
+          context.moveTo(0, Math.round(y) + 0.5);
+          context.lineTo(game.width, Math.round(y) + 0.5);
+          context.stroke();
+        }
+
+        context.strokeStyle = "rgba(158, 227, 125, 0.28)";
+        context.beginPath();
+        context.moveTo(0, Math.round(game.groundY) + 0.5);
+        context.lineTo(game.width, Math.round(game.groundY) + 0.5);
+        context.stroke();
+        context.restore();
+      }
+
+      function drawEditorSelection() {
+        if (!editor.selection) return;
+
+        const bounds = getSelectionBounds(editor.selection);
+        if (!bounds) return;
+
+        context.save();
+        context.strokeStyle = "#ffe66d";
+        context.lineWidth = 2;
+        context.setLineDash([6, 4]);
+        context.strokeRect(
+          Math.round(worldToScreenX(bounds.x)) + 0.5,
+          Math.round(bounds.y) + 0.5,
+          Math.round(bounds.width),
+          Math.round(bounds.height),
+        );
+        context.restore();
+      }
+
+      function getSelectionBounds(selection) {
+        if (selection.type === "template") return getTemplateBounds();
+
+        const object = getSelectedObject(selection);
+        if (!object) return null;
+
+        if (selection.collection === "platforms" || selection.collection === "scenicPlatforms") {
+          return getPlatformBounds(object);
+        }
+
+        if (selection.collection === "trees") {
+          return getTreeBounds(object);
+        }
+
+        if (selection.collection === "decorations") {
+          return getDecorationBounds(object);
+        }
+
+        return null;
+      }
+
+      function drawPlayer() {
+        const sprite = sprites[player.animation] || sprites.idle;
+        if (!sprite.image) return;
+
+        const rawFrame = Math.floor(player.animationTime * sprite.fps);
+        const frame = sprite.loop ? rawFrame % sprite.frameCount : Math.min(rawFrame, sprite.frameCount - 1);
+        const sourceX = frame * sprite.frameWidth;
+        const drawWidth = sprite.frameWidth * sprite.scale;
+        const drawHeight = sprite.frameHeight * sprite.scale;
+        const drawY = Math.round(player.y - drawHeight + sprite.footOffset * sprite.scale);
+
+        context.save();
+        context.translate(Math.round(player.x), drawY);
+        context.scale(player.facing, 1);
+        context.drawImage(
+          sprite.image,
+          sourceX,
+          0,
+          sprite.frameWidth,
+          sprite.frameHeight,
+          -drawWidth / 2,
+          0,
+          drawWidth,
+          drawHeight,
+        );
+        context.restore();
+      }
+
+      function gameLoop(timestamp) {
+        requestAnimationFrame(gameLoop);
+
+        if (!game.loaded) return;
+
+        if (!game.lastFrameTime) {
+          game.lastFrameTime = timestamp;
+          draw();
+          return;
+        }
+
+        const elapsed = timestamp - game.lastFrameTime;
+        if (elapsed < FRAME_STEP) return;
+
+        const deltaSeconds = Math.min(elapsed / 1000, 0.05);
+        game.lastFrameTime = timestamp - (elapsed % FRAME_STEP);
+        updateInputFromGamepad();
+
+        if (editor.enabled) {
+          updateEditor(deltaSeconds);
+        } else {
+          update(deltaSeconds);
+        }
+        draw();
+      }
+
+      async function start() {
+        setupEditorUi();
+        setupEditorInput();
+        await loadLevelFromStorage(true);
+        resize();
+        window.addEventListener("resize", resize);
+        window.addEventListener("keydown", handleKeyDown);
+        window.addEventListener("keyup", handleKeyUp);
+        await Promise.all([
+          ...Object.values(sprites).map(loadSprite),
+          ...backgroundLayers.map(loadBackgroundLayer),
+          ...Object.values(foreground).map(loadImageAsset),
+        ]);
+        updateBackgroundLayout();
+        updateLevelGeometry();
+        updateCamera();
+        game.loaded = true;
+        requestAnimationFrame(gameLoop);
+      }
+
+      function handleKeyDown(event) {
+        if (event.code === "KeyE" && !event.repeat) {
+          event.preventDefault();
+          setEditorEnabled(!editor.enabled);
+          return;
+        }
+
+        if (editor.enabled) {
+          handleEditorKey(event, true);
+          return;
+        }
+
+        if (isPlayControlKey(event.code)) {
+          event.preventDefault();
+        }
+
+        if (event.code === "ArrowLeft") {
+          keyboardInput.left = true;
+        }
+
+        if (event.code === "ArrowRight") {
+          keyboardInput.right = true;
+        }
+
+        if (event.code === "ArrowUp" || event.code === "KeyW") {
+          keyboardInput.up = true;
+        }
+
+        mergeInputSources();
+
+        if (event.code === "Space" && !event.repeat) {
+          jump();
+        }
+
+        if (event.code === "KeyJ" && !event.repeat) {
+          attack(1);
+        }
+
+        if (event.code === "KeyK" && !event.repeat) {
+          attack(2);
+        }
+
+        if (event.code === "KeyL" && !event.repeat) {
+          attack(3);
+        }
+
+        if ((event.code === "ArrowDown" || event.code === "KeyS") && !event.repeat) {
+          keyboardInput.down = true;
+          mergeInputSources();
+          startDownAction();
+        }
+
+        if ((event.code === "ShiftLeft" || event.code === "ShiftRight") && !event.repeat) {
+          roll();
+        }
+      }
+
+      function handleKeyUp(event) {
+        if (editor.enabled) {
+          handleEditorKey(event, false);
+          return;
+        }
+
+        if (isPlayControlKey(event.code)) {
+          event.preventDefault();
+        }
+
+        if (event.code === "ArrowLeft") {
+          keyboardInput.left = false;
+        }
+
+        if (event.code === "ArrowRight") {
+          keyboardInput.right = false;
+        }
+
+        if (event.code === "ArrowUp" || event.code === "KeyW") {
+          keyboardInput.up = false;
+        }
+
+        if (event.code === "ArrowDown" || event.code === "KeyS") {
+          keyboardInput.down = false;
+        }
+
+        mergeInputSources();
+      }
+
+      function isPlayControlKey(code) {
+        return (
+          code === "ArrowLeft" ||
+          code === "ArrowRight" ||
+          code === "ArrowUp" ||
+          code === "ArrowDown" ||
+          code === "KeyW" ||
+          code === "KeyS" ||
+          code === "KeyJ" ||
+          code === "KeyK" ||
+          code === "KeyL" ||
+          code === "Space" ||
+          code === "ShiftLeft" ||
+          code === "ShiftRight"
+        );
+      }
+
+      function handleEditorKey(event, isDown) {
+        if (event.code === "ArrowLeft" || event.code === "KeyA") {
+          event.preventDefault();
+          editor.keys.left = isDown;
+        }
+
+        if (event.code === "ArrowRight" || event.code === "KeyD") {
+          event.preventDefault();
+          editor.keys.right = isDown;
+        }
+
+        if (event.code === "Delete" || event.code === "Backspace") {
+          event.preventDefault();
+          if (isDown && !event.repeat) deleteEditorSelection();
+        }
+
+        if (event.code === "Escape" && isDown) {
+          event.preventDefault();
+          editor.selection = null;
+          setEditorStatus("Select");
+        }
+      }
+
+      start();
+    </script>
+  </body>
+</html>

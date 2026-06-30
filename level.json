@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "savedAt": "2026-06-30T00:11:26.100Z",
+  "level": {
+    "width": 3648,
+    "startX": 240,
+    "finishX": 3552,
+    "platforms": [
+      {
+        "kind": "rock",
+        "x": -48,
+        "yOffset": 0,
+        "columns": 15,
+        "rows": 4
+      },
+      {
+        "kind": "thin",
+        "x": 720,
+        "yOffset": -96,
+        "columns": 6
+      },
+      {
+        "kind": "rock",
+        "x": 1104,
+        "yOffset": -48,
+        "columns": 8,
+        "rows": 4
+      },
+      {
+        "kind": "thin",
+        "x": 1536,
+        "yOffset": -144,
+        "columns": 5
+      },
+      {
+        "kind": "rock",
+        "x": 1824,
+        "yOffset": 48,
+        "columns": 9,
+        "rows": 4
+      },
+      {
+        "kind": "thin",
+        "x": 2352,
+        "yOffset": -48,
+        "columns": 6
+      },
+      {
+        "kind": "rock",
+        "x": 2736,
+        "yOffset": 48,
+        "columns": 18,
+        "rows": 4
+      }
+    ],
+    "scenicPlatforms": [
+      {
+        "kind": "rock",
+        "x": -288,
+        "yOffset": -240,
+        "columns": 5,
+        "rows": 6
+      },
+      {
+        "kind": "rock",
+        "x": 1584,
+        "yOffset": -528,
+        "columns": 3,
+        "rows": 3
+      },
+      {
+        "kind": "rock",
+        "x": 2784,
+        "yOffset": -576,
+        "columns": 4,
+        "rows": 3
+      }
+    ],
+    "trees": [
+      {
+        "frame": 0,
+        "x": -96,
+        "yOffset": -240,
+        "scale": 1.75
+      },
+      {
+        "frame": 0,
+        "x": 144,
+        "yOffset": 0,
+        "scale": 2.1
+      },
+      {
+        "frame": 1,
+        "x": 528,
+        "yOffset": 0,
+        "scale": 1.65
+      },
+      {
+        "frame": 0,
+        "x": 912,
+        "yOffset": -96,
+        "scale": 1.35
+      },
+      {
+        "frame": 1,
+        "x": 1248,
+        "yOffset": -48,
+        "scale": 2
+      },
+      {
+        "frame": 0,
+        "x": 1680,
+        "yOffset": -528,
+        "scale": 1.35
+      },
+      {
+        "frame": 0,
+        "x": 1968,
+        "yOffset": 48,
+        "scale": 1.9
+      },
+      {
+        "frame": 1,
+        "x": 2880,
+        "yOffset": -576,
+        "scale": 1.45
+      },
+      {
+        "frame": 1,
+        "x": 2928,
+        "yOffset": 48,
+        "scale": 2.15
+      },
+      {
+        "frame": 0,
+        "x": 3408,
+        "yOffset": 48,
+        "scale": 1.85
+      }
+    ],
+    "decorations": [
+      {
+        "kind": "bush",
+        "x": 240,
+        "yOffset": 0
+      },
+      {
+        "kind": "fence",
+        "x": 432,
+        "yOffset": 0
+      },
+      {
+        "kind": "bridge",
+        "x": 240,
+        "yOffset": 0,
+        "pieces": 1
+      },
+      {
+        "kind": "spikes",
+        "x": 816,
+        "yOffset": -96,
+        "count": 2
+      },
+      {
+        "kind": "fence",
+        "x": 1152,
+        "yOffset": -48
+      },
+      {
+        "kind": "bush",
+        "x": 1296,
+        "yOffset": -48
+      },
+      {
+        "kind": "bridge",
+        "x": 1584,
+        "yOffset": -144,
+        "pieces": 1
+      },
+      {
+        "kind": "bush",
+        "x": 1920,
+        "yOffset": 48
+      },
+      {
+        "kind": "spikes",
+        "x": 2064,
+        "yOffset": 48,
+        "count": 3
+      },
+      {
+        "kind": "fence",
+        "x": 2928,
+        "yOffset": 48
+      },
+      {
+        "kind": "spikes",
+        "x": 3168,
+        "yOffset": 48,
+        "count": 2
+      },
+      {
+        "kind": "bush",
+        "x": 3312,
+        "yOffset": 48
+      }
+    ]
+  },
+  "template": {
+    "visible": false,
+    "x": 0,
+    "y": 0,
+    "scale": 2.25,
+    "opacity": 0.45
+  }
+}
